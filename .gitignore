@@ -1,0 +1,33 @@
+# Binaries
+tg-mcp
+tg-mcp.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Session files (sensitive!)
+.tg-mcp-session.json
+*-session.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude
+.claude/
+
+# Logs
+logs/
+*.log
+
+# Python venv (for mcpo)
+mcpo-venv/
+venv/
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
