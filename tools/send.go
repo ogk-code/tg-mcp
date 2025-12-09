@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/gotd/td/tg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -51,51 +50,16 @@ func SendMessage(c *client.Client) func(ctx context.Context, req *mcp.CallToolRe
 			}, nil
 		}
 
-		var updates tg.UpdatesClass
-		var err error
-
-		if userID, parseErr := strconv.ParseInt(input.Chat, 10, 64); parseErr == nil {
-			api := c.API()
-			dialogs, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				OffsetPeer: &tg.InputPeerEmpty{},
-				Limit:      100,
-			})
-			if err != nil {
-				return nil, SendMessageOutput{
-					Success: false,
-					Message: fmt.Sprintf("Failed to get dialogs: %v", err),
-				}, nil
-			}
-
-			var inputPeer tg.InputPeerClass
-			if md, ok := dialogs.(*tg.MessagesDialogs); ok {
-				for _, u := range md.Users {
-					if user, ok := u.(*tg.User); ok && user.ID == userID {
-						inputPeer = &tg.InputPeerUser{UserID: user.ID, AccessHash: user.AccessHash}
-						break
-					}
-				}
-			} else if md, ok := dialogs.(*tg.MessagesDialogsSlice); ok {
-				for _, u := range md.Users {
-					if user, ok := u.(*tg.User); ok && user.ID == userID {
-						inputPeer = &tg.InputPeerUser{UserID: user.ID, AccessHash: user.AccessHash}
-						break
-					}
-				}
-			}
-
-			if inputPeer == nil {
-				return nil, SendMessageOutput{
-					Success: false,
-					Message: fmt.Sprintf("User %d not found in dialogs", userID),
-				}, nil
-			}
-
-			updates, err = sender.To(inputPeer).Text(ctx, input.Text)
-		} else {
-			updates, err = sender.Resolve(input.Chat).Text(ctx, input.Text)
+		api := c.API()
+		inputPeer, err := getPeerFromDialogsOrResolve(ctx, api, input.Chat)
+		if err != nil {
+			return nil, SendMessageOutput{
+				Success: false,
+				Message: fmt.Sprintf("Failed to resolve chat: %v", err),
+			}, nil
 		}
 
+		updates, err := sender.To(inputPeer).Text(ctx, input.Text)
 		if err != nil {
 			return nil, SendMessageOutput{
 				Success: false,
@@ -130,51 +94,16 @@ func ReplyMessage(c *client.Client) func(ctx context.Context, req *mcp.CallToolR
 			}, nil
 		}
 
-		var updates tg.UpdatesClass
-		var err error
-
-		if userID, parseErr := strconv.ParseInt(input.Chat, 10, 64); parseErr == nil {
-			api := c.API()
-			dialogs, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-				OffsetPeer: &tg.InputPeerEmpty{},
-				Limit:      100,
-			})
-			if err != nil {
-				return nil, ReplyMessageOutput{
-					Success: false,
-					Message: fmt.Sprintf("Failed to get dialogs: %v", err),
-				}, nil
-			}
-
-			var inputPeer tg.InputPeerClass
-			if md, ok := dialogs.(*tg.MessagesDialogs); ok {
-				for _, u := range md.Users {
-					if user, ok := u.(*tg.User); ok && user.ID == userID {
-						inputPeer = &tg.InputPeerUser{UserID: user.ID, AccessHash: user.AccessHash}
-						break
-					}
-				}
-			} else if md, ok := dialogs.(*tg.MessagesDialogsSlice); ok {
-				for _, u := range md.Users {
-					if user, ok := u.(*tg.User); ok && user.ID == userID {
-						inputPeer = &tg.InputPeerUser{UserID: user.ID, AccessHash: user.AccessHash}
-						break
-					}
-				}
-			}
-
-			if inputPeer == nil {
-				return nil, ReplyMessageOutput{
-					Success: false,
-					Message: fmt.Sprintf("User %d not found in dialogs", userID),
-				}, nil
-			}
-
-			updates, err = sender.To(inputPeer).Reply(input.MessageID).Text(ctx, input.Text)
-		} else {
-			updates, err = sender.Resolve(input.Chat).Reply(input.MessageID).Text(ctx, input.Text)
+		api := c.API()
+		inputPeer, err := getPeerFromDialogsOrResolve(ctx, api, input.Chat)
+		if err != nil {
+			return nil, ReplyMessageOutput{
+				Success: false,
+				Message: fmt.Sprintf("Failed to resolve chat: %v", err),
+			}, nil
 		}
 
+		updates, err := sender.To(inputPeer).Reply(input.MessageID).Text(ctx, input.Text)
 		if err != nil {
 			return nil, ReplyMessageOutput{
 				Success: false,

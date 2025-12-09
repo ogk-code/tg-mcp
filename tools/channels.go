@@ -469,6 +469,167 @@ func ExportInviteLink(c *client.Client) func(ctx context.Context, req *mcp.CallT
 	}
 }
 
+type GetChannelMembersInput struct {
+	Channel string `json:"channel"`
+	Limit   int    `json:"limit,omitempty"`
+	Offset  int    `json:"offset,omitempty"`
+	Filter  string `json:"filter,omitempty"`
+}
+
+type ChannelMember struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Bot       bool   `json:"bot"`
+	Admin     bool   `json:"admin"`
+	Creator   bool   `json:"creator"`
+}
+
+type GetChannelMembersOutput struct {
+	Success bool            `json:"success"`
+	Members []ChannelMember `json:"members,omitempty"`
+	Total   int             `json:"total,omitempty"`
+	Message string          `json:"message,omitempty"`
+}
+
+func GetChannelMembers(c *client.Client) func(ctx context.Context, req *mcp.CallToolRequest, input GetChannelMembersInput) (*mcp.CallToolResult, GetChannelMembersOutput, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, input GetChannelMembersInput) (*mcp.CallToolResult, GetChannelMembersOutput, error) {
+		if !c.IsAuthorized() {
+			return nil, GetChannelMembersOutput{
+				Success: false,
+				Message: "Not authorized",
+			}, nil
+		}
+
+		api := c.API()
+		if api == nil {
+			return nil, GetChannelMembersOutput{
+				Success: false,
+				Message: "Client is not running",
+			}, nil
+		}
+
+		inputChannel, err := getChannelFromDialogs(ctx, api, input.Channel)
+		if err != nil {
+			return nil, GetChannelMembersOutput{
+				Success: false,
+				Message: fmt.Sprintf("Failed to find channel: %v", err),
+			}, nil
+		}
+
+		limit := input.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		if limit > 200 {
+			limit = 200
+		}
+
+		var filter tg.ChannelParticipantsFilterClass
+		switch input.Filter {
+		case "admins":
+			filter = &tg.ChannelParticipantsAdmins{}
+		case "bots":
+			filter = &tg.ChannelParticipantsBots{}
+		case "banned":
+			filter = &tg.ChannelParticipantsKicked{Q: ""}
+		case "restricted":
+			filter = &tg.ChannelParticipantsBanned{Q: ""}
+		default:
+			filter = &tg.ChannelParticipantsRecent{}
+		}
+
+		participants, err := api.ChannelsGetParticipants(ctx, &tg.ChannelsGetParticipantsRequest{
+			Channel: inputChannel,
+			Filter:  filter,
+			Offset:  input.Offset,
+			Limit:   limit,
+		})
+		if err != nil {
+			return nil, GetChannelMembersOutput{
+				Success: false,
+				Message: fmt.Sprintf("Failed to get members: %v", err),
+			}, nil
+		}
+
+		cp, ok := participants.(*tg.ChannelsChannelParticipants)
+		if !ok {
+			return nil, GetChannelMembersOutput{
+				Success: false,
+				Message: "Unexpected response type",
+			}, nil
+		}
+
+		userMap := make(map[int64]*tg.User)
+		for _, u := range cp.Users {
+			if user, ok := u.(*tg.User); ok {
+				userMap[user.ID] = user
+			}
+		}
+
+		adminSet := make(map[int64]bool)
+		creatorSet := make(map[int64]bool)
+		for _, p := range cp.Participants {
+			switch pt := p.(type) {
+			case *tg.ChannelParticipantCreator:
+				creatorSet[pt.UserID] = true
+				adminSet[pt.UserID] = true
+			case *tg.ChannelParticipantAdmin:
+				adminSet[pt.UserID] = true
+			}
+		}
+
+		members := make([]ChannelMember, 0, len(cp.Participants))
+		for _, p := range cp.Participants {
+			var userID int64
+			switch pt := p.(type) {
+			case *tg.ChannelParticipant:
+				userID = pt.UserID
+			case *tg.ChannelParticipantSelf:
+				userID = pt.UserID
+			case *tg.ChannelParticipantCreator:
+				userID = pt.UserID
+			case *tg.ChannelParticipantAdmin:
+				userID = pt.UserID
+			case *tg.ChannelParticipantBanned:
+				if peer, ok := pt.Peer.(*tg.PeerUser); ok {
+					userID = peer.UserID
+				}
+			case *tg.ChannelParticipantLeft:
+				if peer, ok := pt.Peer.(*tg.PeerUser); ok {
+					userID = peer.UserID
+				}
+			}
+
+			if userID == 0 {
+				continue
+			}
+
+			user := userMap[userID]
+			if user == nil {
+				continue
+			}
+
+			members = append(members, ChannelMember{
+				ID:        user.ID,
+				FirstName: user.FirstName,
+				LastName:  user.LastName,
+				Username:  user.Username,
+				Bot:       user.Bot,
+				Admin:     adminSet[userID],
+				Creator:   creatorSet[userID],
+			})
+		}
+
+		return nil, GetChannelMembersOutput{
+			Success: true,
+			Members: members,
+			Total:   cp.Count,
+		}, nil
+	}
+}
+
 func RegisterChannelsTools(server *mcp.Server, c *client.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_channel",
@@ -504,4 +665,9 @@ func RegisterChannelsTools(server *mcp.Server, c *client.Client) {
 		Name:        "export_invite_link",
 		Description: "Export/create invite link for a channel or group",
 	}, ExportInviteLink(c))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_channel_members",
+		Description: "Get channel/group members. Filter: admins, bots, banned, restricted (default: recent). Supports pagination with offset/limit.",
+	}, GetChannelMembers(c))
 }
