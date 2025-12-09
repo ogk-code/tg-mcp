@@ -35,6 +35,7 @@ func main() {
 	tools.RegisterChatsTools(server, tgClient)
 	tools.RegisterManageTools(server, tgClient)
 	tools.RegisterUsersTools(server, tgClient)
+	tools.RegisterChannelsTools(server, tgClient)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
